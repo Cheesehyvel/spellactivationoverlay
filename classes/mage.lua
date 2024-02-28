@@ -13,18 +13,20 @@ local clearcastingVariants; -- Lazy init in lazyCreateClearcastingVariants()
 local hotStreakSpellID = 48108;
 local heatingUpSpellID = 48107; -- Does not exist in Wrath Classic
 local hotStreakHeatingUpSpellID = hotStreakSpellID+heatingUpSpellID; -- Made up entirely, does not even exist in Retail
+local hotStreakSoD = 400625;
+local hotStreakRune = 400624;
 
 -- Because the Heating Up buff does not exist in Wrath of the Lich King
 -- We try to guess when the mage should virtually get this buff
 local HotStreakHandler = {}
 
 -- Initialize constants
-HotStreakHandler.init = function(self, spellName)
+HotStreakHandler.init = function(self, spellName, isSoD)
     local fire_blast = { 2136, 2137, 2138, 8412, 8413, 10197, 10199, 27078, 27079, 42872, 42873 }
     local fireball = { 133, 143, 145, 3140, 8400, 8401, 8402, 10148, 10149, 10150, 10151, 25306, 27070, 38692, 42832, 42833 }
-    local frostfire_bolt = { 44614, 47610 };
+    local frostfire_bolt = { 44614, 47610, 401502 };
     -- local living_bomb = { 44457, 55359, 55360 } this is the DOT effect, which we do NOT want
-    local living_bomb = { 44461, 55361, 55362 }
+    local living_bomb = { 44461, 55361, 55362, 400614 }
     local scorch = { 2948, 8444, 8445, 8446, 10205, 10206, 10207, 27073, 27074, 42858, 42859 }
 
     self.spells = {}
@@ -38,6 +40,8 @@ HotStreakHandler.init = function(self, spellName)
     addSpellPack(frostfire_bolt);
     addSpellPack(living_bomb);
     addSpellPack(scorch);
+
+    self.isSoD = isSoD;
 
     local _, _, tab, index = SAO:GetTalentByName(spellName);
     if (tab and index) then
@@ -63,6 +67,12 @@ HotStreakHandler.isSpellTracked = function(self, spellID)
 end
 
 HotStreakHandler.hasHotStreakTalent = function(self)
+    -- Check if base spell is learned
+    if (self.isSoD) then
+        local baseSpell = FindBaseSpellByID(hotStreakRune);
+        return IsSpellKnown(baseSpell);
+    end
+
     -- Talent information could not be retrieved for Hot Streak
     if (not self.talent) then
         return false;
@@ -114,19 +124,19 @@ local function hotStreakCLEU(self, ...)
     -- If Hot Streak buff was acquired or lost, we have our immediate answer
     -- We assume there is no third charge i.e., if a crit occurs under Hot Streak buff, there is no hidden Heating Up
     if (event == "SPELL_AURA_APPLIED") then
-        if (spellID == hotStreakSpellID) then
+        if (spellID == hotStreakSpellID or spellID == hotStreakSoD) then
             deactivateHeatingUp(self, heatingUpSpellID);
             HotStreakHandler.state = 'hot_streak';
         end
         return;
     elseif (event == "SPELL_AURA_REFRESH") then
-        if (spellID == hotStreakSpellID) then
+        if (spellID == hotStreakSpellID or spellID == hotStreakSoD) then
             deactivateHeatingUp(self, hotStreakHeatingUpSpellID);
             HotStreakHandler.state = 'hot_streak';
         end
         return;
     elseif (event == "SPELL_AURA_REMOVED") then
-        if (spellID == hotStreakSpellID) then
+        if (spellID == hotStreakSpellID or spellID == hotStreakSoD) then
             if (HotStreakHandler.state == 'hot_streak_heating_up') then
                 deactivateHeatingUp(self, hotStreakHeatingUpSpellID);
                 activateHeatingUp(self, heatingUpSpellID);
@@ -421,11 +431,15 @@ local FrozenHandler = {
 }
 
 local function customLogin(self, ...)
-    -- Must initialize class on PLAYER_LOGIN instead of registerClass
-    -- Because we need the talent tree, which is not always available right off the bat
-    local hotStreakSpellName = GetSpellInfo(hotStreakSpellID);
-    if (hotStreakSpellName) then
-        HotStreakHandler:init(hotStreakSpellName);
+    if self.IsWrath() then
+        -- Must initialize class on PLAYER_LOGIN instead of registerClass
+        -- Because we need the talent tree, which is not always available right off the bat
+        local hotStreakSpellName = GetSpellInfo(hotStreakSpellID);
+        if (hotStreakSpellName) then
+            HotStreakHandler:init(hotStreakSpellName, false);
+        end
+    elseif self.IsSoD() then
+        HotStreakHandler:init(nil, true);
     end
 
     if (not FrozenHandler.initialized) then
@@ -478,7 +492,11 @@ local function registerClass(self)
     -- Fire Procs
     self:RegisterAura("impact", 0, 64343, "lock_and_load", "Top", 1, 255, 255, 255, true, { (GetSpellInfo(2136)) });
     self:RegisterAura("firestarter", 0, 54741, "impact", "Top", 0.8, 255, 255, 255, true, { (GetSpellInfo(2120)) }); -- May conflict with Impact location
-    self:RegisterAura("hot_streak_full", 0, hotStreakSpellID, "hot_streak", "Left + Right (Flipped)", 1, 255, 255, 255, true, { (GetSpellInfo(11366)) });
+    if self.IsWrath() then
+        self:RegisterAura("hot_streak_full", 0, hotStreakSpellID, "hot_streak", "Left + Right (Flipped)", 1, 255, 255, 255, true, { (GetSpellInfo(11366)) });
+    elseif self.IsSoD() then
+        self:RegisterAura("hot_streak_full", 0, hotStreakSoD, "hot_streak", "Left + Right (Flipped)", 1, 255, 255, 255, true, { (GetSpellInfo(11366)) });
+    end
     self:RegisterAura("hot_streak_half", 0, heatingUpSpellID, "hot_streak", "Left + Right (Flipped)", 0.5, 255, 255, 255, false); -- Does not exist, but define it for option testing
     self:RegisterAura("hot_streak_duo", 0, hotStreakHeatingUpSpellID, "hot_streak", "Left + Right (Flipped)", 0.5, 255, 255, 255, false); -- Does not exist, but define it for option testing
     self:RegisterAura("hot_streak_duo", 0, hotStreakHeatingUpSpellID, "hot_streak", "Left + Right (Flipped)", 1, 255, 255, 255, true); -- Does not exist, but define it for option testing
@@ -533,6 +551,7 @@ local function loadOptions(self)
     local hotStreakBuff = hotStreakSpellID;
     local hotStreakHeatingUpBuff = hotStreakHeatingUpSpellID; -- Made up
     local hotStreakTalent = 44445;
+    local hotStreakRune = 400624;
 
     local firestarterBuff = 54741;
     local firestarterTalent = 44442;
@@ -602,9 +621,16 @@ local function loadOptions(self)
         self:AddOverlayOption(arcaneBlastSoDBuff, arcaneBlastSoDBuff, 0, oneToThreeStacks, nil, 3); -- setup any stacks, test with 3 stacks
         self:AddOverlayOption(arcaneBlastSoDBuff, arcaneBlastSoDBuff, 4); -- setup 4 stacks
     end
-    self:AddOverlayOption(hotStreakTalent, heatingUpBuff, 0, heatingUpDetails);
-    self:AddOverlayOption(hotStreakTalent, hotStreakBuff, 0, hotStreakDetails);
-    self:AddOverlayOption(hotStreakTalent, hotStreakHeatingUpBuff, 0, hotStreakHeatingUpDetails);
+
+    if self.IsWrath() then
+        self:AddOverlayOption(hotStreakTalent, heatingUpBuff, 0, heatingUpDetails);
+        self:AddOverlayOption(hotStreakTalent, hotStreakBuff, 0, hotStreakDetails);
+        self:AddOverlayOption(hotStreakTalent, hotStreakHeatingUpBuff, 0, hotStreakHeatingUpDetails);
+    elseif self.IsSoD() then
+        self:AddOverlayOption(hotStreakRune, heatingUpBuff, 0, heatingUpDetails);
+        self:AddOverlayOption(hotStreakRune, hotStreakSoD, 0, hotStreakDetails);
+        self:AddOverlayOption(hotStreakRune, hotStreakHeatingUpBuff, 0, hotStreakHeatingUpDetails);
+    end
     self:AddOverlayOption(firestarterTalent, firestarterBuff);
     self:AddOverlayOption(impactTalent, impactBuff);
     if self.IsWrath() then
@@ -620,7 +646,11 @@ local function loadOptions(self)
         self:AddGlowingOption(arcaneBlastSoDBuff, arcaneBlastSoDBuff, arcaneMissiles, fourStacks);
         self:AddGlowingOption(arcaneBlastSoDBuff, arcaneBlastSoDBuff, arcaneExplosion, fourStacks);
     end
-    self:AddGlowingOption(hotStreakTalent, hotStreakBuff, pyroblast);
+    if self.IsWrath() then
+        self:AddGlowingOption(hotStreakTalent, hotStreakBuff, pyroblast);
+    elseif self.IsSoD() then
+        self:AddGlowingOption(hotStreakRune, hotStreakSoD, pyroblast);
+    end
     self:AddGlowingOption(firestarterTalent, firestarterBuff, flamestrike);
     if not self.IsEra() then -- Must exclude this option specifically for Classic Era, because the talent exists in Era but the proc is passive
         self:AddGlowingOption(impactTalent, impactBuff, fireBlast);

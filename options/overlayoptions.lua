@@ -10,7 +10,7 @@ local AddonName, SAO = ...
 -- testAuraID optional spell ID used to test the aura in lieu of auraID
 function SAO.AddOverlayOption(self, talentID, auraID, count, talentSubText, variants, testStacks, testAuraID)
     if self.IsEra() then -- @todo Maybe run the test below for all projects, not only Classic Era
-        if not GetSpellInfo(talentID) or not GetSpellInfo(auraID) then
+        if not GetSpellInfo(talentID) then
             return;
         end
     end
